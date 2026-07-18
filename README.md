@@ -230,14 +230,16 @@ sudo ufw allow 80/tcp
 sudo ufw allow 8000/tcp
 ```
 
-### 5. ImageBuilder 镜像拉取失败
+### 5. 固件构建失败
 
 ```bash
-# 检查网络连接
-ping downloads.openwrt.org
+# 查看 Worker 日志
+podman logs asu-worker --tail 50
 
-# 手动拉取测试
-podman pull ghcr.io/openwrt/imagebuilder:mediatek-filogic-latest
+# 清理缓存重试
+cd ~/immortalwrt-cloud
+rm -rf public/store/*
+podman restart asu-worker
 ```
 
 ## 🐛 故障排查流程
