@@ -12,7 +12,10 @@ err() { echo -e "\033[1;31m[$(date '+%H:%M:%S')] ERROR: $*\033[0m"; exit 1; }
 ASU_DIR="$HOME/immortalwrt-cloud"
 ASU_REPO="https://github.com/openwrt/asu.git"
 FRONTEND_REPO="https://github.com/openwrt/firmware-selector-openwrt-org.git"
-VM_IP=$(hostname -I | awk '{print $1}')
+VM_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
+if [ -z "$VM_IP" ]; then
+    VM_IP=$(hostname -I | awk '{print $1}')
+fi
 
 # ImmortalWrt 包架构（用于插件源）
 # 常见架构: aarch64_cortex-a53 (ARM64), x86_64 (x86), mips_24kc (MIPS)
@@ -28,8 +31,36 @@ sudo apt-get update -qq
 sudo apt-get install -y -qq podman podman-compose python3 python3-venv git jq curl >/dev/null 2>&1
 log "  ✓ 依赖安装完成"
 
+# 强制优先使用 IPv4（部分服务器的 IPv6 出口在建立 TLS 连接时不稳定，
+# 拉取 Docker Hub 镜像时容易出现 "connection reset by peer"，
+# 这里让 glibc 的地址选择算法优先返回 IPv4 地址，避免走不通的 IPv6 通道）
+if ! grep -q '^precedence ::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
+    echo 'precedence ::ffff:0:0/96  100' | sudo tee -a /etc/gai.conf > /dev/null
+    log "  ✓ 已配置系统优先使用 IPv4（/etc/gai.conf）"
+else
+    log "  ✓ 系统已配置优先使用 IPv4，跳过"
+fi
+
 # ========== [2/7] Podman 配置 ==========
 log "[2/7] 配置 Podman..."
+
+# 配置 Docker Hub 镜像加速（国内 Docker Hub 直连不稳定）
+MIRROR_CONF="/etc/containers/registries.conf.d/docker-mirror.conf"
+if [ ! -f "$MIRROR_CONF" ]; then
+    sudo tee "$MIRROR_CONF" > /dev/null << 'MIRROR'
+[[registry]]
+location = "docker.io"
+
+[[registry.mirror]]
+location = "docker.1ms.run"
+
+[[registry.mirror]]
+location = "docker.xuanyuan.me"
+MIRROR
+    log "  ✓ Docker Hub 镜像加速已配置"
+else
+    log "  ✓ Docker Hub 镜像加速已存在，跳过"
+fi
 
 # 启用 podman socket（worker 需要它来创建构建容器）
 sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
@@ -49,8 +80,12 @@ fi
 log "  ✓ podman.socket 已就绪"
 
 # 创建构建隔离网络
+# 注意：此网络目前只是创建出来，asu.toml 和下方 worker 容器启动命令
+# 都没有引用它，因此实际构建容器不会被隔离在这个网络里。
+# 如果需要真正的构建隔离，需确认 ASU 是否支持类似 build_network 的配置项，
+# 并在 asu.toml 中显式指定，否则这一步等同于空操作。
 podman network create asu-build 2>/dev/null || true
-log "  ✓ asu-build 网络已创建"
+log "  ✓ asu-build 网络已创建（当前未被 worker 实际使用，见上方注释）"
 
 # ========== [3/7] 克隆仓库 ==========
 log "[3/7] 克隆仓库..."
@@ -92,7 +127,7 @@ build_ttl_unversioned = "24h"
 build_defaults_ttl = "30m"
 build_failure_ttl = "1h"
 max_pending_jobs = 200
-job_timeout = "10m"
+job_timeout = "30m"
 
 # 允许用户自定义仓库（ImmortalWrt 插件源）
 repository_allow_list = [
@@ -100,8 +135,9 @@ repository_allow_list = [
 ]
 ASUTOML
 
-# 创建 podman.sock 软链接（worker 需要）
-ln -sf "/run/user/$(id -u)/podman/podman.sock" podman.sock
+# 记录真实 podman.sock 路径（worker 直接挂载真实路径，不用软链接中转，
+# 避免部分 podman/docker 版本对 volume 为符号链接的处理不一致导致挂载失败）
+PODMAN_SOCK="/run/user/$(id -u)/podman/podman.sock"
 
 # 创建目录
 mkdir -p public/store redis-data
@@ -119,7 +155,7 @@ var config = {
   image_url: "https://downloads.openwrt.org",
   // nginx 反向代理同源，无需 CORS
   asu_url: "http://VM_IP_PLACEHOLDER",
-  asu_extra_packages: ["luci", "luci-app-attendedsysupgrade"],
+  asu_extra_packages: ["luci-i18n-base-zh-cn", "luci-i18n-firewall-zh-cn", "luci-i18n-package-manager-zh-cn", "block-mount", "kmod-nf-nathelper"],
   asu_repositories: {
     "immortalwrt_luci": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/luci/packages.adb",
     "immortalwrt_packages": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/packages/packages.adb",
@@ -142,17 +178,37 @@ log "[6/7] 构建镜像 + 启动服务..."
 
 cd "$ASU_DIR/asu"
 
-# 构建 ASU 镜像
+# 优先直接拉取官方预构建镜像（Docker Hub 上已有现成的 openwrt/asu:latest），
+# 避免本地构建时因为 uv.lock 缺失/版本不一致等仓库自身构建配置问题导致失败。
+# 只有拉取失败（比如镜像被下架）时才回退到本地构建。
 if podman image exists openwrt/asu:latest 2>/dev/null; then
-    log "  ✓ ASU 镜像已存在，跳过构建"
+    log "  ✓ ASU 镜像已存在，跳过拉取/构建"
+elif podman pull docker.io/openwrt/asu:latest; then
+    log "  ✓ 已从 Docker Hub 拉取官方 ASU 镜像"
 else
+    log "  ⚠️ 拉取官方镜像失败，回退为本地构建..."
+
+    # ASU 的 Dockerfile 用 `uv sync --frozen` 安装依赖，这要求仓库里必须有 uv.lock。
+    # 如果浅克隆到的这个提交缺少锁文件（或和 pyproject.toml 不同步），
+    # 这里提前用 uv 生成一份，避免 build 中途因为 --frozen 报错。
+    if [ ! -f uv.lock ]; then
+        log "  未找到 uv.lock，先在宿主机生成锁文件..."
+        if ! command -v uv >/dev/null 2>&1; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            # shellcheck disable=SC1090
+            source "$HOME/.local/bin/env" 2>/dev/null || export PATH="$HOME/.local/bin:$PATH"
+        fi
+        uv lock
+        log "  ✓ uv.lock 已生成"
+    fi
+
     log "  构建 ASU 镜像（约 3-5 分钟）..."
     podman build -t openwrt/asu:latest .
     log "  ✓ ASU 镜像构建完成"
 fi
 
-# 清理已存在的旧容器（容器名用短横线，不是下划线）
-for c in asu-redis asu-server asu-worker; do
+# 清理已存在的旧容器
+for c in asu-redis redis asu-server asu-worker; do
     if podman ps -a --format '{{.Names}}' | grep -q "^${c}$"; then
         log "  清理旧容器: $c"
         podman rm -f "$c" 2>/dev/null || true
@@ -189,6 +245,7 @@ podman run -d \
     --network host \
     -v "$(pwd)/asu.toml:/app/asu.toml:ro" \
     -v "$(pwd)/public:/public:rw" \
+    -e ASU_SERVER_CONFIG=/app/asu.toml \
     openwrt/asu:latest \
     uv run uvicorn --host 0.0.0.0 asu.main:app
 
@@ -200,44 +257,47 @@ podman run -d \
     --network host \
     -v "$(pwd)/asu.toml:/app/asu.toml:ro" \
     -v "$(pwd)/public:/public:rw" \
-    -v "$(pwd)/podman.sock:/var/podman.sock:rw" \
+    -v "$PODMAN_SOCK:/var/podman.sock:rw" \
+    -e ASU_SERVER_CONFIG=/app/asu.toml \
     openwrt/asu:latest \
-    uv run rqworker --logging_level INFO
+    uv run rq worker --logging_level INFO
 
 # 安装 nginx（反向代理，解决 CORS 跨域问题）
 log "  配置 nginx 反向代理..."
 sudo apt-get install -y -qq nginx >/dev/null 2>&1
 
-# 修复 nginx 403：让 www-data 用户有权限读取 /home/anime/ 下的文件
-sudo usermod -aG anime www-data
+# 修复 nginx 403：让 www-data 用户有权限读取当前用户 home 目录下的文件
+# 注意：使用当前登录用户名而非写死的用户名，脚本才能在任意用户下通用
+CURRENT_USER="$(whoami)"
+sudo usermod -aG "$CURRENT_USER" www-data
 chmod 755 "$HOME"
 chmod -R 755 "$ASU_DIR/firmware-selector/www"
 
-# 写入 nginx 配置
-sudo tee /etc/nginx/sites-available/firmware-selector > /dev/null << 'NGINX'
+# 写入 nginx 配置（这里不能用引号包裹的 heredoc 'NGINX'，否则 $ASU_DIR 不会被替换）
+sudo tee /etc/nginx/sites-available/firmware-selector > /dev/null << NGINX
 server {
     listen 80;
     server_name _;
 
     # 前端静态文件
-    root /home/anime/immortalwrt-cloud/firmware-selector/www;
+    root $ASU_DIR/firmware-selector/www;
     index index.html;
 
     # ASU 后端 API 代理（同源，无 CORS 问题）
     location /json/ {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_read_timeout 300s;
         proxy_connect_timeout 10s;
     }
 
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_read_timeout 600s;
         proxy_connect_timeout 10s;
         client_max_body_size 50M;
@@ -245,8 +305,8 @@ server {
 
     location /store/ {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
     }
 }
 NGINX
