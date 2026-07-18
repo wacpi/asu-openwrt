@@ -292,12 +292,9 @@ fi
 # 测试 profile API（端到端验证：版本 → 目标 → 设备）
 LATEST=$(echo "$OVERVIEW" | jq -r '.latest[0]' 2>/dev/null)
 if [ -n "$LATEST" ] && [ "$LATEST" != "null" ]; then
-    # 随机选择一个目标和设备进行测试
-    TARGET=$(echo "$OVERVIEW" | jq -r '.latest_targets[0]' 2>/dev/null || echo "mediatek/filogic")
-    PROFILE_URL="http://127.0.0.1:8000/json/v1/releases/$LATEST/targets/$TARGET.json"
-    if curl -s "$PROFILE_URL" | jq -e '.profiles' >/dev/null 2>&1; then
-        DEVICE_COUNT=$(curl -s "$PROFILE_URL" | jq '.profiles | length' 2>/dev/null)
-        log "  ✓ Profile API 正常: $TARGET (OpenWrt $LATEST, $DEVICE_COUNT 个设备)"
+    PROFILE_URL="http://127.0.0.1:8000/json/v1/releases/$LATEST/targets/mediatek/filogic/netcore_n60-pro.json"
+    if curl -s "$PROFILE_URL" | jq -e '.titles' >/dev/null 2>&1; then
+        log "  ✓ Profile API 正常: mediatek/filogic (OpenWrt $LATEST)"
     else
         log "  ⚠️ Profile API 测试跳过（可手动验证）"
     fi
