@@ -91,38 +91,13 @@ chmod +x openwrt.sh
 └─────────────────────────────────────────────────────────┘
 ```
 
-## 📦 支持的设备
-
-脚本默认支持 `mediatek/filogic` 架构，常见设备：
-
-| 品牌 | 型号 | 芯片 |
-|------|------|------|
-| **Netcore** | N60 Pro | MT7986A |
-| **GL.iNet** | GL-MT6000 | MT7986A |
-| **MediaTek** | AP-MT7986A | MT7986A |
-
-> 💡 可修改脚本中的 `TARGET` 和 `ARCH` 变量支持其他设备
-
 ## 🔧 自定义配置
 
-### 修改默认设备
+### ImmortalWrt 插件源
 
-编辑 `openwrt.sh`，修改以下变量：
+脚本默认配置了 ImmortalWrt 官方源：
 
-```bash
-# 目标设备架构
-TARGET="mediatek/filogic"
-
-# CPU 架构
-ARCH="aarch64_cortex-a53"
-```
-
-### 添加 ImmortalWrt 插件源
-
-脚本默认配置了以下插件源：
-
-```bash
-# ImmortalWrt 官方源
+```toml
 repository_allow_list = [
     "https://downloads.immortalwrt.org/",
 ]
@@ -144,6 +119,8 @@ repository_allow_list = [
 ```
 luci luci-app-attendedsysupgrade luci-app-passwall luci-i18n-passwall-zh-cn luci-app-homeproxy luci-i18n-homeproxy-zh-cn luci-app-adguardhome luci-i18n-adguardhome-zh-cn luci-app-ddns-go luci-i18n-ddns-go-zh-cn luci-app-upnp luci-i18n-upnp-zh-cn
 ```
+
+> 💡 设备型号由 OpenWrt/ImmortalWrt 上游项目决定，脚本部署后在 Web 界面选择即可
 
 ## 📂 文件结构
 
