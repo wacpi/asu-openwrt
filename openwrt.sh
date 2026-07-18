@@ -1,7 +1,7 @@
 #!/bin/bash
 # ASU + Firmware Selector 一键部署脚本
 # 目标: OpenWrt ASU + ImmortalWrt 插件源 + 前端
-# 适用: Ubuntu 26.04 LTS (Hyper-V VM)
+# 适用: Ubuntu 22.04/24.04/26.04 LTS
 set -euo pipefail
 
 # ========== 工具函数 ==========

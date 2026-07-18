@@ -8,7 +8,7 @@
 ## ✨ 特性
 
 - 🚀 **一键部署** - 单脚本完成全部配置
-- 🔧 **ImmortalWrt 支持** - 内置 passwall/homeproxy/adguardhome 插件源
+- 🔧 **ImmortalWrt 支持** - 内置插件源
 - 🌐 **Web 界面** - Firmware Selector 前端
 - 🔒 **安全隔离** - Podman rootless 容器
 - ⚡ **自动构建** - 支持多设备/多版本固件编译
@@ -103,22 +103,17 @@ repository_allow_list = [
 ]
 ```
 
-### 常用插件包
+### 自定义插件
 
-在 Web 界面选择固件时，可以添加以下包：
+在 Web 界面选择固件时，可以添加自定义包。常见插件类型：
 
-| 插件 | 包名 | 说明 |
-|------|------|------|
-| **PassWall** | `luci-app-passwall` | 代理工具 |
-| **HomeProxy** | `luci-app-homeproxy` | 代理工具 |
-| **AdGuardHome** | `luci-app-adguardhome` | 广告过滤 |
-| **DDNS-Go** | `luci-app-ddns-go` | 动态 DNS |
-| **UPnP** | `luci-app-upnp` | 自动端口映射 |
+| 类型 | 说明 |
+|------|------|
+| **系统工具** | LuCI 界面、中文语言包 |
+| **网络服务** | DNS、DDNS、UPnP |
+| **管理工具** | 系统监控、流量统计 |
 
-完整包名示例：
-```
-luci luci-app-attendedsysupgrade luci-app-passwall luci-i18n-passwall-zh-cn luci-app-homeproxy luci-i18n-homeproxy-zh-cn luci-app-adguardhome luci-i18n-adguardhome-zh-cn luci-app-ddns-go luci-i18n-ddns-go-zh-cn luci-app-upnp luci-i18n-upnp-zh-cn
-```
+> 💡 具体可用插件取决于 ImmortalWrt 源中的软件包
 
 > 💡 设备型号由 OpenWrt/ImmortalWrt 上游项目决定，脚本部署后在 Web 界面选择即可
 
