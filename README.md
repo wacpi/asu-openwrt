@@ -117,13 +117,64 @@ repository_allow_list = [
 
 > 💡 设备型号由 OpenWrt/ImmortalWrt 上游项目决定，脚本部署后在 Web 界面选择即可
 
+## 🔐 第三方软件源签名验证
+
+OpenWrt 25.12+ 的 ImageBuilder 使用 APK 包管理器，默认强制开启包签名验证（`CONFIG_SIGNATURE_CHECK=y`）。
+添加 ImmortalWrt 等第三方源时，APK 需要找到对应的公钥才能验证包签名。
+
+### 方案原理
+
+不修改 ASU 或 ImageBuilder 代码，不绕过签名检查。通过 Podman 自身的 `containers.conf` 机制注入
+`APK_KEYS` 环境变量，让 ImageBuilder 的 Makefile 在调用 apk 时指向正确的密钥目录：
+
+```
+rootfs.mk 中 apk 函数定义:
+    --keys-dir $(if $(APK_KEYS),$(APK_KEYS),$(TOPDIR))
+
+链路:
+  ~/.config/containers/containers.conf
+    → Podman 创建构建容器时自动注入 APK_KEYS=/builder/keys
+      → ImageBuilder 容器内 Make 从环境继承 $(APK_KEYS)
+        → apk --keys-dir /builder/keys ...
+          → /builder/keys/ 内有前端 asu_repository_keys 传入的 ImmortalWrt 公钥
+            → APK 正常验证 ImmortalWrt 包签名，无 UNTRUSTED 错误
+```
+
+### 涉及文件
+
+| 文件 | 来源 | 操作 | 作用 |
+|------|------|------|------|
+| `~/.config/containers/containers.conf` | Podman 配置，脚本新增 | **创建** | 注入 `APK_KEYS=/builder/keys` 到所有构建容器 |
+| `asu/asu/build.py` | ASU 上游 | **不动** | worker 调用 `inject_files()` 将前端密钥写入 `/builder/keys/` |
+| `asu/asu.toml` | ASU 配置，脚本模板生成 | **创建** | 配置 `cache_url`、`repository_allow_list`、`base_container` 等 |
+| `firmware-selector/www/config.js` | 前端配置，脚本模板生成 | **创建** | 定义 ImmortalWrt 源 URL、公钥 (`asu_repository_keys`) |
+| `include/rootfs.mk` | ImageBuilder 内部 | **不动** | 定义 apk 函数，`APK_KEYS` 控制 `--keys-dir` 路径 |
+| `include/image.mk` | ImageBuilder 内部 | **不动** | 定义 `$(if $(CONFIG_SIGNATURE_CHECK),,--allow-untrusted)` |
+
+### 与旧方案对比
+
+| | 旧方案 | 新方案 |
+|--|--------|--------|
+| 方法 | 容器内 sed `.config` 注释 `CONFIG_SIGNATURE_CHECK` | `containers.conf` 注入 `APK_KEYS` 环境变量 |
+| 产物 | `build-patched.py` + volume mount 覆盖原始 `build.py` | 无代码 patch |
+| 签名 | **绕过**（`--allow-untrusted`） | **保留**（放入正确公钥路径） |
+| 侵入性 | 修改 ASU 源码行为 | 零侵入，纯 Podman 配置 |
+
 ## 📂 文件结构
 
 ```
 .
 ├── openwrt.sh          # 一键部署脚本
 ├── README.md           # 本文档
-└── LICENSE             # MIT 许可证
+├── LICENSE             # MIT 许可证
+└── (部署后)
+    ├── ~/.config/containers/containers.conf   # Podman 容器默认环境变量
+    ├── ~/immortalwrt-cloud/
+    │   ├── asu/asu.toml                       # ASU 后端配置
+    │   ├── asu/asu/                           # ASU 源码（未修改）
+    │   ├── firmware-selector/www/config.js    # 前端配置
+    │   └── public/store/                      # 构建产物
+    └── /etc/nginx/sites-available/firmware-selector  # nginx 反向代理配置
 ```
 
 ## 🔍 服务管理
