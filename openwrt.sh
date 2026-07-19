@@ -449,6 +449,18 @@ log "  ✓ nginx 反向代理已配置（端口 80）"
 
 log "  ✓ 所有服务已启动"
 
+# 生成 systemd 用户服务，确保重启后容器自动恢复
+log "  生成 systemd user service（重启自动拉起容器）..."
+mkdir -p "$HOME/.config/systemd/user"
+cd "$HOME/.config/systemd/user"
+podman generate systemd --name asu-redis --files --new 2>/dev/null
+podman generate systemd --name asu-server --files --new 2>/dev/null
+podman generate systemd --name asu-worker --files --new 2>/dev/null
+systemctl --user daemon-reload 2>/dev/null
+systemctl --user enable container-asu-redis.service container-asu-server.service container-asu-worker.service 2>/dev/null
+log "  ✓ systemd user service 已启用"
+cd "$ASU_DIR/asu"
+
 # ========== [7/7] 验证 ==========
 log "[7/7] 验证部署..."
 
