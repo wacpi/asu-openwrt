@@ -25,16 +25,19 @@
 
 ## 🚀 快速开始
 
-### 1. 传输脚本到服务器
+### 1. 直接远程执行（推荐）
+
+```bash
+# 无需上传，直接在服务器上执行：
+bash <(curl -sSL https://raw.githubusercontent.com/wacpi/asu-openwrt/main/openwrt.sh)
+```
+
+### 2. 或先传输再执行
 
 ```bash
 # 本地执行（Windows/macOS/Linux）
 scp openwrt.sh user@your-server:~/
-```
 
-### 2. SSH 登录并执行
-
-```bash
 # SSH 登录
 ssh user@your-server
 
@@ -315,6 +318,15 @@ podman restart asu-worker
 ```
 
 ## 📝 更新日志
+
+### v1.1 (2026-07-19)
+- 🔧 修复：CRLF 自修复失败需执行两次的问题
+- 🔧 修复：`source` 不存在文件导致脚本中断
+- 🔧 修复：`apt-get` 静默安装吞掉错误信息
+- 🔧 修复：Ctrl+C 中断后留下孤儿容器（添加 trap 清理）
+- 🔧 修复：容器重启后不会自动恢复（systemd user service）
+- 🚀 改进：ImmortalWrt 插件源版本自适应，不再硬编码 `packages-25.12`
+- 📖 文档：更新快速开始，支持 `curl | bash` 一键远程执行
 
 ### v1.0 (2024-07-18)
 - ✨ 初始版本
