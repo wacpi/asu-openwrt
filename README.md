@@ -328,7 +328,7 @@ podman restart asu-worker
 - 🚀 改进：ImmortalWrt 插件源版本自适应，不再硬编码 `packages-25.12`
 - 📖 文档：更新快速开始，支持 `curl | bash` 一键远程执行
 
-### v1.0 (2024-07-18)
+### v1.0 (2026-07-18)
 - ✨ 初始版本
 - ✨ 支持 ImmortalWrt 插件源
 - ✨ Podman rootless 部署
