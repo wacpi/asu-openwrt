@@ -4,11 +4,14 @@
 # Windows 上传时导致 CRLF（\r\n）→ 见顶部修复
 #
 # ========== CRLF 自动修复（必须紧接 shebang，不留空行）==========
-# bash 遇到 CRLF 空行(\r)会崩，所以修复逻辑塞在一行内
-head -1 "$0" 2>/dev/null | grep -q $'\r' 2>/dev/null && sed -i 's/\r$//' "$0" && exec bash "$0" "$@"
+# bash 遇到 CRLF 空行(\r)会崩；先洗文件，洗完通过 stdin 重定向确保 exec 不受残留 \r 影响
+(head -1 "$0" 2>/dev/null | grep -q $'\r' 2>/dev/null) && sed -i 's/\r$//' "$0" && exec bash "$0" "$@" </dev/null
 # ============================================================
 
 set -euo pipefail
+
+# Ctrl+C 时清理已启动的容器，避免留下孤儿
+trap 'echo ""; log "部署中断，清理容器..."; podman rm -f asu-redis asu-server asu-worker 2>/dev/null; exit 1' INT TERM
 
 # ========== 工具函数 ==========
 log() { echo -e "\033[1;32m[$(date '+%H:%M:%S')] $*\033[0m"; }
@@ -34,7 +37,7 @@ log "[1/7] 安装系统依赖..."
 sudo dpkg --configure -a 2>/dev/null || true
 
 sudo apt-get update -qq
-sudo apt-get install -y -qq podman podman-compose python3 python3-venv git jq curl >/dev/null 2>&1
+sudo apt-get install -y -qq podman podman-compose python3 python3-venv git jq curl 2>&1
 log "  ✓ 依赖安装完成"
 
 # 强制优先使用 IPv4（部分服务器的 IPv6 出口在建立 TLS 连接时不稳定，
@@ -197,8 +200,8 @@ var config = {
   asu_extra_packages: ["luci", "luci-i18n-base-zh-cn", "luci-i18n-firewall-zh-cn", "luci-i18n-package-manager-zh-cn", "block-mount", "bridger", "kmod-nf-nathelper"],
   // ImmortalWrt 插件源（ASU 通过 cache_url 将仓库地址改写为本地缓存代理）
   asu_repositories: {
-    "immortalwrt_luci": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/luci/packages.adb",
-    "immortalwrt_packages": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/packages/packages.adb",
+    "immortalwrt_luci": "https://downloads.immortalwrt.org/releases/packages-{openwrt_branch}/ARCH_PLACEHOLDER/luci/packages.adb",
+    "immortalwrt_packages": "https://downloads.immortalwrt.org/releases/packages-{openwrt_branch}/ARCH_PLACEHOLDER/packages/packages.adb",
   },
   asu_repositories_mode: "append",
   asu_repository_keys: [
@@ -235,8 +238,7 @@ else
         log "  未找到 uv.lock，先在宿主机生成锁文件..."
         if ! command -v uv >/dev/null 2>&1; then
             curl -LsSf https://astral.sh/uv/install.sh | sh
-            # shellcheck disable=SC1090
-            source "$HOME/.local/bin/env" 2>/dev/null || export PATH="$HOME/.local/bin:$PATH"
+            export PATH="$HOME/.local/bin:$PATH"
         fi
         uv lock
         log "  ✓ uv.lock 已生成"
@@ -304,7 +306,7 @@ podman run -d \
 
 # 安装 nginx（反向代理，解决 CORS 跨域问题）
 log "  配置 nginx 反向代理..."
-sudo apt-get install -y -qq nginx >/dev/null 2>&1
+sudo apt-get install -y -qq nginx 2>&1
 
 # 创建缓存目录
 sudo mkdir -p /var/cache/openwrt-mirror /var/cache/immortalwrt-mirror
@@ -512,7 +514,7 @@ else
 fi
 
 # 测试缓存代理（ImmortalWrt 源）
-CACHE_TEST2=$(curl -sI "http://127.0.0.1:8889/releases/packages-25.12/aarch64_cortex-a53/luci/packages.adb" 2>/dev/null | head -1)
+CACHE_TEST2=$(curl -sI "http://127.0.0.1:8889/releases/packages-25.12/$ARCH/luci/packages.adb" 2>/dev/null | head -1)
 if echo "$CACHE_TEST2" | grep -q "200\|404"; then
     log "  ✓ ImmortalWrt 缓存代理正常（端口 8889）"
 else
