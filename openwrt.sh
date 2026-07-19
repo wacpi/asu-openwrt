@@ -5,7 +5,8 @@
 #
 # ========== CRLF 自动修复（必须紧接 shebang，不留空行）==========
 # bash 遇到 CRLF 空行(\r)会崩；先洗文件，洗完通过 stdin 重定向确保 exec 不受残留 \r 影响
-(head -1 "$0" 2>/dev/null | grep -q $'\r' 2>/dev/null) && sed -i 's/\r$//' "$0" && exec bash "$0" "$@" </dev/null
+# 注意：只有在常规文件（非 curl | bash 管道）时才执行修复，管道模式 $0 为 /dev/fd/xx
+[ -f "$0" ] && (head -1 "$0" 2>/dev/null | grep -q $'\r' 2>/dev/null) && sed -i 's/\r$//' "$0" && exec bash "$0" "$@" </dev/null
 # ============================================================
 
 set -euo pipefail

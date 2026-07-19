@@ -25,11 +25,16 @@
 
 ## 🚀 快速开始
 
-### 1. 直接远程执行（推荐）
+### 1. 直接远程执行
 
 ```bash
-# 无需上传，直接在服务器上执行：
-bash <(curl -sSL https://raw.githubusercontent.com/wacpi/asu-openwrt/master/openwrt.sh)
+# 方式 A：下载后执行（推荐，兼容性最好）
+curl -sSLO https://raw.githubusercontent.com/wacpi/asu-openwrt/master/openwrt.sh
+chmod +x openwrt.sh
+./openwrt.sh
+
+# 方式 B：管道一键执行（快捷，部分系统可能因编码问题报错）
+# bash <(curl -sSL https://raw.githubusercontent.com/wacpi/asu-openwrt/master/openwrt.sh)
 ```
 
 ### 2. 或先传输再执行
