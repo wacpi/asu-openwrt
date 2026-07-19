@@ -108,34 +108,30 @@ else
     log "  ✓ 前端已存在"
 fi
 
-# ========== [3.5] 补丁: 第三方源 APK 签名绕过 ==========
-# OpenWrt 25.12 的 ImageBuilder 使用 APK v3 包管理器，默认启用签名验证
-# (.config 中 CONFIG_SIGNATURE_CHECK=y)。第三方仓库 (如 ImmortalWrt) 使用不同于
-# OpenWrt 的签名密钥，APK 无法验证其签名，构建会报 "UNTRUSTED signature"。
+# ========== [3.5] 配置 APK 密钥目录 ==========
+# ImmortalWrt 的 ImageBuilder 使用 APK 包管理器，默认通过 APK_KEYS 环境变量
+# 指定密钥目录。ASU 的 inject_files() 会将前端的 asu_repository_keys 写入
+# /builder/keys/ 目录。通过 podman containers.conf 设置 APK_KEYS 环境变量，
+# Makefile (rootfs.mk) 会使用 --keys-dir /builder/keys 调用 apk 来验证包签名。
 #
-# 注意: 不能通过 make 命令行传 CONFIG_SIGNATURE_CHECK= 来覆盖 .config，
-# GNU Make 的 include .config 优先级高于命令行变量。必须在容器内直接 sed 修改
-# .config 文件，使 CONFIG_SIGNATURE_CHECK=y 取消设置，从而让 Makefile 的
-# $(if $(CONFIG_SIGNATURE_CHECK),,--allow-untrusted) 自动添加 --allow-untrusted。
+# 原理:
+#   rootfs.mk 中 apk 函数:
+#     --keys-dir $(if $(APK_KEYS),$(APK_KEYS),$(TOPDIR))
+#   containers.conf 注入 APK_KEYS=/builder/keys → Make 从环境继承 → 正确路径
 #
-# 具体做法: 在 build.py 的 inject_files() 调用之后插入 run_cmd，在容器内执行 sed
-# 修改 .config。通过 patched build.py 以 volume mount 注入 worker 容器。
-log "[3.5] 补丁 build.py: 绕过第三方仓库 APK 签名验证..."
+# 这种方式不动代码、不绕签名、一次性配置，对所有 future 构建容器生效。
+log "[3.5] 配置 Podman 容器默认环境变量 (APK_KEYS)..."
 
-PATCHED_BUILD="$ASU_DIR/asu/asu/build-patched.py"
-cp "$ASU_DIR/asu/asu/build.py" "$PATCHED_BUILD"
+mkdir -p "$HOME/.config/containers"
+if ! grep -q 'APK_KEYS' "$HOME/.config/containers/containers.conf" 2>/dev/null; then
+    cat >> "$HOME/.config/containers/containers.conf" << 'ENDCONF'
 
-# 在 inject_files() 调用之后插入 sed 修改 .config 的步骤
-sed -i '/inject_files(container, build_request, job)/a\
-\
-        # Bypass APK signature check for third-party repos (e.g. ImmortalWrt)\
-        run_cmd(container, ["sed", "-i", "s/^CONFIG_SIGNATURE_CHECK=y/# CONFIG_SIGNATURE_CHECK is not set/", ".config"])' "$PATCHED_BUILD"
-
-# 验证补丁已应用
-if grep -q 'Bypass APK signature check' "$PATCHED_BUILD"; then
-    log "  ✓ build.py 补丁已生成: $PATCHED_BUILD"
+[containers]
+env = ["APK_KEYS=/builder/keys"]
+ENDCONF
+    log "  ✓ APK_KEYS 已写入 containers.conf"
 else
-    err "build.py 补丁失败，请检查 sed 命令"
+    log "  ✓ APK_KEYS 已存在 containers.conf，跳过"
 fi
 
 # ========== [4/7] 配置 ASU ==========
@@ -302,7 +298,6 @@ podman run -d \
     -v "$(pwd)/asu.toml:/app/asu.toml:ro" \
     -v "$(pwd)/public:/public:rw" \
     -v "$PODMAN_SOCK:/var/podman.sock:rw" \
-    -v "$(pwd)/asu/build-patched.py:/app/asu/build.py:ro" \
     -e ASU_SERVER_CONFIG=/app/asu.toml \
     openwrt/asu:latest \
     uv run rq worker --logging_level INFO
