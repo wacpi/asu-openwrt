@@ -31,6 +31,11 @@ fi
 # 常见架构: aarch64_cortex-a53 (ARM64), x86_64 (x86), mips_24kc (MIPS)
 ARCH="aarch64_cortex-a53"
 
+# 是否在中国大陆（影响镜像加速配置）
+#   yes = 配置 Docker Hub / ghcr.io 镜像加速（适用于国内服务器直连官方源慢）
+#   no  = 不使用镜像加速，直连官方源（适用于海外服务器或有代理的环境）
+CHINA_MAINLAND="yes"
+
 # ========== [1/7] 系统依赖 ==========
 log "[1/7] 安装系统依赖..."
 
@@ -54,10 +59,12 @@ fi
 # ========== [2/7] Podman 配置 ==========
 log "[2/7] 配置 Podman..."
 
-# 配置 Docker Hub 镜像加速（国内 Docker Hub 直连不稳定）
-MIRROR_CONF="/etc/containers/registries.conf.d/docker-mirror.conf"
-if [ ! -f "$MIRROR_CONF" ]; then
-    sudo tee "$MIRROR_CONF" > /dev/null << 'MIRROR'
+# 根据 CHINA_MAINLAND 配置镜像加速
+if [ "$CHINA_MAINLAND" = "yes" ]; then
+    # Docker Hub 镜像加速
+    MIRROR_CONF="/etc/containers/registries.conf.d/docker-mirror.conf"
+    if [ ! -f "$MIRROR_CONF" ]; then
+        sudo tee "$MIRROR_CONF" > /dev/null << 'MIRROR'
 [[registry]]
 location = "docker.io"
 
@@ -67,9 +74,28 @@ location = "docker.1ms.run"
 [[registry.mirror]]
 location = "docker.xuanyuan.me"
 MIRROR
-    log "  ✓ Docker Hub 镜像加速已配置"
+        log "  ✓ Docker Hub 镜像加速已配置"
+    else
+        log "  ✓ Docker Hub 镜像加速已存在，跳过"
+    fi
+
+    # ghcr.io 镜像加速（ImageBuilder 在此托管）
+    GHCR_MIRROR_CONF="/etc/containers/registries.conf.d/ghcr-mirror.conf"
+    if [ ! -f "$GHCR_MIRROR_CONF" ]; then
+        printf '[[registry]]\nlocation = "ghcr.io"\n\n[[registry.mirror]]\nlocation = "ghcr.nju.edu.cn"\n' | sudo tee "$GHCR_MIRROR_CONF" > /dev/null
+        log "  ✓ ghcr.io 镜像加速已配置"
+    else
+        log "  ✓ ghcr.io 镜像加速已存在，跳过"
+    fi
 else
-    log "  ✓ Docker Hub 镜像加速已存在，跳过"
+    # 海外/有代理：确保不使用镜像，清理已有镜像配置
+    for f in /etc/containers/registries.conf.d/docker-mirror.conf /etc/containers/registries.conf.d/ghcr-mirror.conf; do
+        if [ -f "$f" ]; then
+            sudo rm -f "$f"
+            log "  ✓ 已删除镜像配置: $f"
+        fi
+    done
+    log "  ✓ 非中国大陆模式，跳过镜像加速配置（直连官方源）"
 fi
 
 # 启用 podman socket（worker 需要它来创建构建容器）
