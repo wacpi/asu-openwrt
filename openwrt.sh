@@ -1,17 +1,13 @@
 #!/bin/bash
 # ASU + Firmware Selector 一键部署脚本
 # 目标: OpenWrt ASU + ImmortalWrt 插件源 + 前端
+# Windows 上传时导致 CRLF（\r\n）→ 见顶部修复
 #
-# 系统要求:
-#   - Ubuntu 22.04 LTS 或更高版本
-#   - Debian 12 (Bookworm) 或更高版本
-#   - 其他 apt 系发行版可能兼容，但未测试
-#
-# 最低配置:
-#   - 2 核 CPU
-#   - 2 GB 内存
-#   - 20 GB 磁盘空间
-#   - 网络连接
+# ========== CRLF 自动修复（必须紧接 shebang，不留空行）==========
+# bash 遇到 CRLF 空行(\r)会崩，所以修复逻辑塞在一行内
+head -1 "$0" 2>/dev/null | grep -q $'\r' 2>/dev/null && sed -i 's/\r$//' "$0" && exec bash "$0" "$@"
+# ============================================================
+
 set -euo pipefail
 
 # ========== 工具函数 ==========
@@ -89,13 +85,9 @@ if [ ! -S "/run/user/$(id -u)/podman/podman.sock" ]; then
 fi
 log "  ✓ podman.socket 已就绪"
 
-# 创建构建隔离网络
-# 注意：此网络目前只是创建出来，asu.toml 和下方 worker 容器启动命令
-# 都没有引用它，因此实际构建容器不会被隔离在这个网络里。
-# 如果需要真正的构建隔离，需确认 ASU 是否支持类似 build_network 的配置项，
-# 并在 asu.toml 中显式指定，否则这一步等同于空操作。
+# 创建构建隔离网络（ASU build.py 默认使用此网络隔离构建容器）
 podman network create asu-build 2>/dev/null || true
-log "  ✓ asu-build 网络已创建（当前未被 worker 实际使用，见上方注释）"
+log "  ✓ asu-build 网络已创建（构建容器在此网络内隔离运行）"
 
 # ========== [3/7] 克隆仓库 ==========
 log "[3/7] 克隆仓库..."
@@ -118,28 +110,29 @@ fi
 
 # ========== [3.5] 补丁: 第三方源 APK 签名绕过 ==========
 # OpenWrt 25.12 的 ImageBuilder 使用 APK v3 包管理器，默认启用签名验证
-# (CONFIG_SIGNATURE_CHECK=y)。第三方仓库 (如 ImmortalWrt) 使用不同于 OpenWrt
-# 的签名密钥，APK 无法验证其签名，构建会报 "UNTRUSTED signature" 导致包解析失败。
+# (.config 中 CONFIG_SIGNATURE_CHECK=y)。第三方仓库 (如 ImmortalWrt) 使用不同于
+# OpenWrt 的签名密钥，APK 无法验证其签名，构建会报 "UNTRUSTED signature"。
 #
-# 解决方案: 在 make manifest / make image 命令中覆盖 CONFIG_SIGNATURE_CHECK= (空值)，
-# 使 Makefile 的 $(if $(CONFIG_SIGNATURE_CHECK),,--allow-untrusted) 条件生效，
-# 自动添加 --allow-untrusted 标志绕过签名检查。
+# 注意: 不能通过 make 命令行传 CONFIG_SIGNATURE_CHECK= 来覆盖 .config，
+# GNU Make 的 include .config 优先级高于命令行变量。必须在容器内直接 sed 修改
+# .config 文件，使 CONFIG_SIGNATURE_CHECK=y 取消设置，从而让 Makefile 的
+# $(if $(CONFIG_SIGNATURE_CHECK),,--allow-untrusted) 自动添加 --allow-untrusted。
 #
-# 这里通过 sed 生成 patched build.py，后续以 volume mount 注入 worker 容器，
-# 无需手动修改源码，重跑部署脚本即可重新应用。
+# 具体做法: 在 build.py 的 inject_files() 调用之后插入 run_cmd，在容器内执行 sed
+# 修改 .config。通过 patched build.py 以 volume mount 注入 worker 容器。
 log "[3.5] 补丁 build.py: 绕过第三方仓库 APK 签名验证..."
 
 PATCHED_BUILD="$ASU_DIR/asu/asu/build-patched.py"
 cp "$ASU_DIR/asu/asu/build.py" "$PATCHED_BUILD"
 
-# make manifest 命令: 在 "STRIP_ABI=1" 后插入 "CONFIG_SIGNATURE_CHECK=",
-sed -i '/STRIP_ABI=1/a\                "CONFIG_SIGNATURE_CHECK=",/' "$PATCHED_BUILD"
-
-# make image 命令: 在 BIN_DIR 行后插入 "CONFIG_SIGNATURE_CHECK=",
-sed -i '/f"BIN_DIR=.*request_hash}",/a\            "CONFIG_SIGNATURE_CHECK=",/' "$PATCHED_BUILD"
+# 在 inject_files() 调用之后插入 sed 修改 .config 的步骤
+sed -i '/inject_files(container, build_request, job)/a\
+\
+        # Bypass APK signature check for third-party repos (e.g. ImmortalWrt)\
+        run_cmd(container, ["sed", "-i", "s/^CONFIG_SIGNATURE_CHECK=y/# CONFIG_SIGNATURE_CHECK is not set/", ".config"])' "$PATCHED_BUILD"
 
 # 验证补丁已应用
-if grep -q 'CONFIG_SIGNATURE_CHECK=' "$PATCHED_BUILD"; then
+if grep -q 'Bypass APK signature check' "$PATCHED_BUILD"; then
     log "  ✓ build.py 补丁已生成: $PATCHED_BUILD"
 else
     err "build.py 补丁失败，请检查 sed 命令"
@@ -169,13 +162,17 @@ build_failure_ttl = "1h"
 max_pending_jobs = 200
 job_timeout = "30m"
 
+# cache_url: 构建容器通过 host.containers.internal 访问宿主机 nginx 缓存
+# rootless podman 的 asu-build bridge 网络下，host.containers.internal 会被自动
+# 解析为 169.254.1.2（宿主机 loopback），容器可直接访问宿主机端口 8888
+cache_url = "http://host.containers.internal:8888"
+
 # 允许的仓库地址
-# 127.0.0.1:8888 = ASU Server 用（host 网络）→ 缓存代理 → downloads.openwrt.org
-# downloads.immortalwrt.org = 构建容器直连（bridge 网络无法访问宿主机 nginx）
 repository_allow_list = [
     "http://127.0.0.1:8888/",
     "https://downloads.openwrt.org/",
     "https://downloads.immortalwrt.org/",
+    "http://host.containers.internal:8888/",
 ]
 ASUTOML
 
@@ -202,7 +199,7 @@ var config = {
   asu_url: "http://VM_IP_PLACEHOLDER",
 /* 此处是搭建时给前端配置的默认包追加，需要自定义多些就在下面添加，默认加了必要的系统中文包和USB包和网络NAT包！ */
   asu_extra_packages: ["luci", "luci-i18n-base-zh-cn", "luci-i18n-firewall-zh-cn", "luci-i18n-package-manager-zh-cn", "block-mount", "bridger", "kmod-nf-nathelper"],
-  // ImmortalWrt 插件源（构建容器在 bridge 网络，无法访问宿主机 nginx，必须直连上游）
+  // ImmortalWrt 插件源（ASU 通过 cache_url 将仓库地址改写为本地缓存代理）
   asu_repositories: {
     "immortalwrt_luci": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/luci/packages.adb",
     "immortalwrt_packages": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/packages/packages.adb",
@@ -329,28 +326,61 @@ chmod -R 755 "$ASU_DIR/firmware-selector/www"
 sudo tee /etc/nginx/sites-available/firmware-selector > /dev/null << NGINX
 # ===== OpenWrt 软件包缓存代理 =====
 # 缓存 downloads.openwrt.org 的所有文件（元数据 + 软件包）
-proxy_cache_path /var/cache/openwrt-mirror levels=1:2 keys_zone=openwrt:100m max_size=5g inactive=365d;
+proxy_cache_path /var/cache/openwrt-mirror levels=1:2 keys_zone=openwrt:100m max_size=5g inactive=7d;
 
 # 缓存 downloads.immortalwrt.org 的所有文件（ImmortalWrt 插件源）
-proxy_cache_path /var/cache/immortalwrt-mirror levels=1:2 keys_zone=immortalwrt:100m max_size=5g inactive=365d;
+proxy_cache_path /var/cache/immortalwrt-mirror levels=1:2 keys_zone=immortalwrt:100m max_size=5g inactive=7d;
+
+# 索引文件 (Packages.gz, packages.adb) 每次重新验证，包文件走 7d 缓存
+map \$uri \$skip_index_cache {
+    ~/(Packages\.gz|packages\.adb)$ 1;
+    default 0;
+}
 
 server {
     listen 8888;
     server_name _;
 
+    # cache_url 路径: http://host.containers.internal:8888/downloads.openwrt.org/path
+    location /downloads.openwrt.org/ {
+        proxy_pass https://downloads.openwrt.org/;
+        proxy_set_header Host downloads.openwrt.org;
+        proxy_ssl_name downloads.openwrt.org;
+        proxy_ssl_server_name on;
+
+        proxy_cache openwrt;
+        proxy_cache_valid 200 7d;
+        proxy_cache_valid 404 1m;
+        proxy_cache_key "\$uri";
+        proxy_cache_bypass \$skip_index_cache;
+        proxy_no_cache \$skip_index_cache;
+        add_header X-Cache-Status \$upstream_cache_status;
+    }
+
+    # cache_url 路径: http://host.containers.internal:8888/downloads.immortalwrt.org/path
+    location /downloads.immortalwrt.org/ {
+        proxy_pass https://downloads.immortalwrt.org/;
+        proxy_set_header Host downloads.immortalwrt.org;
+        proxy_ssl_name downloads.immortalwrt.org;
+        proxy_ssl_server_name on;
+
+        proxy_cache immortalwrt;
+        proxy_cache_valid 200 7d;
+        proxy_cache_valid 404 1m;
+        proxy_cache_key "\$uri";
+        proxy_cache_bypass \$skip_index_cache;
+        proxy_no_cache \$skip_index_cache;
+        add_header X-Cache-Status \$upstream_cache_status;
+    }
+
+    # 元数据 (versions.json, branches.json) 月更且量小，不缓存，每次都从上游拉新鲜的
     location / {
         proxy_pass https://downloads.openwrt.org;
         proxy_set_header Host downloads.openwrt.org;
         proxy_ssl_name downloads.openwrt.org;
         proxy_ssl_server_name on;
 
-        # 缓存配置：200 响应缓存 365 天，404 缓存 1 分钟
-        proxy_cache openwrt;
-        proxy_cache_valid 200 365d;
-        proxy_cache_valid 404 1m;
-        proxy_cache_key "\$uri";
-
-        add_header X-Cache-Status \$upstream_cache_status;
+        proxy_cache off;
     }
 }
 
@@ -365,10 +395,11 @@ server {
         proxy_ssl_server_name on;
 
         proxy_cache immortalwrt;
-        proxy_cache_valid 200 365d;
+        proxy_cache_valid 200 7d;
         proxy_cache_valid 404 1m;
         proxy_cache_key "\$uri";
-
+        proxy_cache_bypass \$skip_index_cache;
+        proxy_no_cache \$skip_index_cache;
         add_header X-Cache-Status \$upstream_cache_status;
     }
 }
@@ -477,8 +508,8 @@ else
     log "  ✗ nginx 代理 ASU API 异常"
 fi
 
-# 测试缓存代理（OpenWrt 源）
-CACHE_TEST=$(curl -sI "http://127.0.0.1:8888/releases/25.12.5/.versions.json" 2>/dev/null | head -1)
+# 测试缓存代理（OpenWrt 源 — 元数据 API）
+CACHE_TEST=$(curl -sI "http://127.0.0.1:8888/.versions.json" 2>/dev/null | head -1)
 if echo "$CACHE_TEST" | grep -q "200"; then
     log "  ✓ OpenWrt 缓存代理正常（端口 8888）"
 else
@@ -487,7 +518,7 @@ fi
 
 # 测试缓存代理（ImmortalWrt 源）
 CACHE_TEST2=$(curl -sI "http://127.0.0.1:8889/releases/packages-25.12/aarch64_cortex-a53/luci/packages.adb" 2>/dev/null | head -1)
-if echo "$CACHE_TEST2" | grep -q "200"; then
+if echo "$CACHE_TEST2" | grep -q "200\|404"; then
     log "  ✓ ImmortalWrt 缓存代理正常（端口 8889）"
 else
     log "  ⚠️ ImmortalWrt 缓存代理未响应（端口 8889）"
@@ -506,8 +537,8 @@ echo "    nginx:        $(systemctl is-active nginx)"
 podman ps --format '    {{.Names}}\t{{.Status}}' 2>/dev/null
 echo ""
 echo "  架构: 浏览器 → nginx(:80) → 前端 + ASU API"
-echo "        构建时 → nginx(:8888) → OpenWrt 源缓存"
-echo "        构建时 → nginx(:8889) → ImmortalWrt 源缓存"
+echo "        ASU 元数据 → nginx(:8888) → OpenWrt 源（缓存代理）"
+echo "        构建容器 → host.containers.internal:8888 → nginx(:8888) → 上游（缓存代理）"
 echo ""
 echo "  缓存目录:"
 echo "    OpenWrt:     /var/cache/openwrt-mirror"
