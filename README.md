@@ -29,7 +29,7 @@
 
 ```bash
 # 无需上传，直接在服务器上执行：
-bash <(curl -sSL https://raw.githubusercontent.com/wacpi/asu-openwrt/main/openwrt.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/wacpi/asu-openwrt/master/openwrt.sh)
 ```
 
 ### 2. 或先传输再执行
