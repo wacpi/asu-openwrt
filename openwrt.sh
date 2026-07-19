@@ -34,7 +34,8 @@ ARCH="aarch64_cortex-a53"
 # 是否在中国大陆（影响镜像加速配置）
 #   yes = 配置 Docker Hub / ghcr.io 镜像加速（适用于国内服务器直连官方源慢）
 #   no  = 不使用镜像加速，直连官方源（适用于海外服务器或有代理的环境）
-CHINA_MAINLAND="yes"
+# 留空或输入回车则在运行时交互询问
+CHINA_MAINLAND=""
 
 # ========== [1/7] 系统依赖 ==========
 log "[1/7] 安装系统依赖..."
@@ -54,6 +55,25 @@ if ! grep -q '^precedence ::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
     log "  ✓ 已配置系统优先使用 IPv4（/etc/gai.conf）"
 else
     log "  ✓ 系统已配置优先使用 IPv4，跳过"
+fi
+
+# 若 CHINA_MAINLAND 未设置，交互询问（只在终端可用时提问，管道模式直接默认 yes）
+if [ -z "$CHINA_MAINLAND" ]; then
+    if [ -t 0 ]; then
+        echo ""
+        echo "  你的服务器在中国大陆吗？"
+        echo "    yes = 配置镜像加速（国内服务器直连官方源慢）"
+        echo "    no  = 直连官方源（海外服务器或有代理的环境）"
+        printf "  请输入 [yes/no] (默认: yes): "
+        read -r CHINA_MAINLAND_INPUT
+        CHINA_MAINLAND="${CHINA_MAINLAND_INPUT:-yes}"
+    else
+        echo ""
+        echo "  检测到管道执行模式，CHINA_MAINLAND 默认为 yes。"
+        echo "  如需更改，请在脚本开头设置 CHINA_MAINLAND=no 后重新运行。"
+        echo ""
+        CHINA_MAINLAND="yes"
+    fi
 fi
 
 # ========== [2/7] Podman 配置 ==========
