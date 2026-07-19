@@ -1,9 +1,4 @@
 #!/bin/bash
-# 自动修复 Windows 换行符（CRLF → LF）
-if grep -qP '\r' "$0" 2>/dev/null; then
-    sed -i 's/\r$//' "$0"
-    exec bash "$0" "$@"
-fi
 # ASU + Firmware Selector 一键部署脚本
 # 目标: OpenWrt ASU + ImmortalWrt 插件源 + 前端
 #
@@ -170,7 +165,8 @@ var config = {
   image_url: "https://downloads.openwrt.org",
   // nginx 反向代理同源，无需 CORS
   asu_url: "http://VM_IP_PLACEHOLDER",
-  asu_extra_packages: ["luci", "luci-app-attendedsysupgrade", "luci-i18n-attendedsysupgrade-zh-cn", "luci-i18n-base-zh-cn", "luci-i18n-firewall-zh-cn", "luci-i18n-package-manager-zh-cn", "block-mount", "bridger", "kmod-nf-nathelper"],
+/* 此处是搭建时给前端配置的默认包追加，需要自定义多些就在下面添加，默认加了必要的系统中文包和USB包和网络NAT包！ */
+  asu_extra_packages: ["luci", "luci-i18n-base-zh-cn", "luci-i18n-firewall-zh-cn", "luci-i18n-package-manager-zh-cn", "block-mount", "bridger", "kmod-nf-nathelper"],
   asu_repositories: {
     "immortalwrt_luci": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/luci/packages.adb",
     "immortalwrt_packages": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/packages/packages.adb",
