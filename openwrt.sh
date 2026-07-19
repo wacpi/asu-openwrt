@@ -155,7 +155,7 @@ var config = {
   image_url: "https://downloads.openwrt.org",
   // nginx 反向代理同源，无需 CORS
   asu_url: "http://VM_IP_PLACEHOLDER",
-  asu_extra_packages: ["luci-i18n-base-zh-cn", "luci-i18n-firewall-zh-cn", "luci-i18n-package-manager-zh-cn", "block-mount", "kmod-nf-nathelper"],
+  asu_extra_packages: ["luci-i18n-base-zh-cn", "luci-i18n-firewall-zh-cn", "luci-i18n-package-manager-zh-cn", "block-mount", "bridger", "kmod-nf-nathelper", "luci-app-cpufreq"],
   asu_repositories: {
     "immortalwrt_luci": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/luci/packages.adb",
     "immortalwrt_packages": "https://downloads.immortalwrt.org/releases/packages-25.12/ARCH_PLACEHOLDER/packages/packages.adb",
