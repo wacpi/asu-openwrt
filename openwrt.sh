@@ -1,7 +1,17 @@
 #!/bin/bash
 # ASU + Firmware Selector 一键部署脚本
 # 目标: OpenWrt ASU + ImmortalWrt 插件源 + 前端
-# 适用: Ubuntu 22.04/24.04/26.04 LTS
+#
+# 系统要求:
+#   - Ubuntu 22.04 LTS 或更高版本
+#   - Debian 12 (Bookworm) 或更高版本
+#   - 其他 apt 系发行版可能兼容，但未测试
+#
+# 最低配置:
+#   - 2 核 CPU
+#   - 2 GB 内存
+#   - 20 GB 磁盘空间
+#   - 网络连接
 set -euo pipefail
 
 # ========== 工具函数 ==========
