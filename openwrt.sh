@@ -27,7 +27,8 @@ if [ -z "$VM_IP" ]; then
     VM_IP=$(hostname -I | awk '{print $1}')
 fi
 
-# ImmortalWrt 包架构（用于插件源）
+# ImmortalWrt 包架构（仅用于验证测试的默认值）
+# 前端运行时已通过 profiles.json 的 arch_packages 自动解析 {arch} 占位符，不再需要此处硬编码
 # 常见架构: aarch64_cortex-a53 (ARM64), x86_64 (x86), mips_24kc (MIPS)
 ARCH="aarch64_cortex-a53"
 
@@ -245,10 +246,11 @@ var config = {
   asu_url: "http://VM_IP_PLACEHOLDER",
 /* 此处是搭建时给前端配置的默认包追加，需要自定义多些就在下面添加，默认加了必要的系统中文包和USB包和网络NAT包！ */
   asu_extra_packages: ["luci", "luci-i18n-base-zh-cn", "luci-i18n-firewall-zh-cn", "luci-i18n-package-manager-zh-cn", "block-mount", "bridger", "kmod-nf-nathelper"],
-  // ImmortalWrt 插件源（ASU 通过 cache_url 将仓库地址改写为本地缓存代理）
+  // ImmortalWrt 插件源（{arch} 在运行时从 profiles.json 自动解析，见下方 fetch 拦截器）
+  // ASU 通过 cache_url 将 https:// 改写为 http://host.containers.internal:8888/ 走缓存
   asu_repositories: {
-    "immortalwrt_luci": "https://downloads.immortalwrt.org/releases/packages-{openwrt_branch}/ARCH_PLACEHOLDER/luci/packages.adb",
-    "immortalwrt_packages": "https://downloads.immortalwrt.org/releases/packages-{openwrt_branch}/ARCH_PLACEHOLDER/packages/packages.adb",
+    "immortalwrt_luci": "https://downloads.immortalwrt.org/releases/packages-{openwrt_branch}/{arch}/luci/packages.adb",
+    "immortalwrt_packages": "https://downloads.immortalwrt.org/releases/packages-{openwrt_branch}/{arch}/packages/packages.adb",
   },
   asu_repositories_mode: "append",
   asu_repository_keys: [
@@ -260,8 +262,45 @@ CONFIGJS
 
 # 替换占位符
 sed -i "s|VM_IP_PLACEHOLDER|$VM_IP|g" config.js
-sed -i "s|ARCH_PLACEHOLDER|$ARCH|g" config.js
 log "  ✓ config.js 已创建（指向 $VM_IP:8000）"
+
+# 追加运行时架构解析器——拦截 profiles.json 请求，自动替换 asu_repositories 中的 {arch}
+cat >> config.js << 'ARCHJS'
+
+// ===== ImmortalWrt 动态架构解析 =====
+// 选择设备时前端会请求 profiles.json（含 arch_packages 字段），
+// 此处拦截该请求，提取架构并替换 asu_repositories URL 中的 {arch} 占位符。
+// 这样无需修改上游 firmware-selector 的 JS 文件。
+(function() {
+  // 保存原始模板（含 {arch}），每次重新解析时从中恢复
+  var _tmpl = {};
+  var _keys = Object.keys(config.asu_repositories);
+  for (var _i = 0; _i < _keys.length; _i++) {
+    _tmpl[_keys[_i]] = config.asu_repositories[_keys[_i]];
+  }
+
+  var _orig = window.fetch;
+  window.fetch = function(url, opts) {
+    return _orig.call(window, url, opts).then(function(resp) {
+      if (resp.ok && typeof url === 'string' && url.indexOf('profiles.json') !== -1) {
+        resp.clone().json().then(function(data) {
+          if (data && data.arch_packages) {
+            var _k = Object.keys(_tmpl);
+            for (var _j = 0; _j < _k.length; _j++) {
+              config.asu_repositories[_k[_j]] = _tmpl[_k[_j]].replace('{arch}', data.arch_packages);
+            }
+            if (window.console && console.log) {
+              console.log('[ImmortalWrt] 已解析架构: ' + data.arch_packages);
+            }
+          }
+        });
+      }
+      return resp;
+    });
+  };
+})();
+ARCHJS
+log "  ✓ 运行时架构解析器已注入 config.js（{arch} → arch_packages）"
 
 # ========== [6/7] 构建镜像 + 启动服务 ==========
 log "[6/7] 构建镜像 + 启动服务..."
@@ -572,9 +611,10 @@ else
     log "  ⚠️ OpenWrt 缓存代理未响应（端口 8888）"
 fi
 
-# 测试缓存代理（ImmortalWrt 源）
+# 测试缓存代理（ImmortalWrt 源）——仅验证 nginx 代理可达，不关心具体 arch
+# 使用 $ARCH 默认值（aarch64_cortex-a53）作为测试路径，404 也算通过（nginx 自身响应正常）
 CACHE_TEST2=$(curl -sI "http://127.0.0.1:8889/releases/packages-25.12/$ARCH/luci/packages.adb" 2>/dev/null | head -1)
-if echo "$CACHE_TEST2" | grep -q "200\|404"; then
+if echo "$CACHE_TEST2" | grep -q "200\|301\|404"; then
     log "  ✓ ImmortalWrt 缓存代理正常（端口 8889）"
 else
     log "  ⚠️ ImmortalWrt 缓存代理未响应（端口 8889）"
