@@ -1,5 +1,7 @@
 # ASU OpenWrt 一键部署
 
+> **OpenWrt 最新内核 + ImmortalWrt 丰富插件源，一台自建服务器全搞定。**  
+> 自建 ASU 云编译系统，自由选择内核版本与第三方软件源，高度自定义预装包。
 一键部署 OpenWrt ASU (Attended SysUpgrade) 云编译系统，支持 ImmortalWrt 插件源。
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
