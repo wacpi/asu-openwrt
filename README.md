@@ -1,8 +1,32 @@
 # ASU OpenWrt 一键部署
 
-> **OpenWrt 最新内核 + ImmortalWrt 丰富插件源，一台自建服务器全搞定。**  
-> 自建 ASU 云编译系统，自由选择内核版本与第三方软件源，高度自定义预装包。
+> **OpenWrt 最新固件 + ImmortalWrt 丰富插件源，一台自建服务器全搞定。**  
+> 自建 ASU 云编译系统，自由选择固件版本与第三方软件源，高度自定义预装包。
 一键部署 OpenWrt ASU (Attended SysUpgrade) 云编译系统，支持 ImmortalWrt 插件源。
+
+> ⚠️ **免责声明 · 使用前必读**
+>
+> **本项目的定位：** 让你用上官方 OpenWrt 固件的同时，能额外安装一些 OpenWrt 官方源没有、但 ImmortalWrt 源提供的插件和软件包。
+>
+> **本项目只做一件事：** 仅追加 ImmortalWrt 的 `luci` 和 `packages` 两个软件源（**不含** `routing`、`base`、`kmods` 等内核级/底层依赖包），确保 ASU 能识别这些源中的软件包供你选择安装。
+>
+> **本项目不提供：**
+> - ❌ OpenWrt 或 ImmortalWrt 的技术支持和故障解决
+> - ❌ 因混用两方源导致的系统崩溃、功能异常、包冲突等问题的排查与修复
+>
+> **上游也不管：**
+> - 🔒 **OpenWrt 官方**不会为这种混源做法提供支持
+> - 🔒 **ImmortalWrt 官方**也不会为这种混源做法提供支持
+>
+> **当前测试结论：**
+> - ✅ `luci` 和 `packages` 源中的软件包（OpenWrt 架构兼容的前提下）目前未发现导致系统崩溃的问题
+> - ⚠️ 但不排除个别插件存在功能兼容性差异，**这不等于 100% 兼容**
+> - 如果选择了仅 ImmortalWrt 特有、与 OpenWrt 内核/ABI 不兼容的包，**可能导致固件构建失败或系统不可用**
+>
+> **使用建议：**
+> - 了解你的需求，确认所选包不在内核/驱动层面依赖 ImmortalWrt 特有修改
+> - 出问题不要找 ImmortalWrt 群，也不要找 OpenWrt 社区——**两边都不会接**
+> - **自己测试，自己兜底**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Shell](https://img.shields.io/badge/shell-bash-green.svg)](openwrt.sh)
