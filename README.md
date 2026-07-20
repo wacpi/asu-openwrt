@@ -10,7 +10,7 @@
 ## ✨ 特性
 
 - 🚀 **一键部署** - 单脚本完成全部配置
-- 🔧 **ImmortalWrt 支持** - 内置插件源
+- 🔧 **ImmortalWrt 支持** - 内置插件源，随 OpenWrt 版本自动匹配
 - 🌐 **Web 界面** - Firmware Selector 前端
 - 🔒 **安全隔离** - Podman rootless 容器
 - ⚡ **自动构建** - 支持多设备/多版本固件编译
