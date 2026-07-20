@@ -13,7 +13,7 @@
 > **本项目不提供：**
 > - ❌ OpenWrt 或 ImmortalWrt 的技术支持和故障解决
 > - ❌ 因混用两方源导致的系统崩溃、功能异常、包冲突等问题的排查与修复
->
+> 
 > **上游也不管：**
 > - 🔒 **OpenWrt 官方**不会为这种混源做法提供支持
 > - 🔒 **ImmortalWrt 官方**也不会为这种混源做法提供支持
@@ -21,9 +21,10 @@
 > **当前测试结论：**
 > - ✅ `luci` 和 `packages` 源中的软件包（OpenWrt 架构兼容的前提下）目前未发现导致系统崩溃的问题
 > - ⚠️ 但不排除个别插件存在功能兼容性差异，**这不等于 100% 兼容**
-> - 如果选择了仅 ImmortalWrt 特有、与 OpenWrt 内核/ABI 不兼容的包，**可能导致固件构建失败或系统不可用**
+> - 如果选择了仅 ImmortalWrt 特有、与 OpenWrt 内核/ABI 不兼容的包，**可能导致固件构建失败或构建成功，但插件在系统内不可正常使用**
 >
 > **使用建议：**
+> - 不要在基础上增加ImmortalWrt的`routing`、`base`、`kmods` 等内核级/底层依赖包，除非你知道它们不会对OpenWrt造成崩溃且可用，一旦操作不当，造成损坏系统请自行解决！
 > - 了解你的需求，确认所选包不在内核/驱动层面依赖 ImmortalWrt 特有修改
 > - 出问题不要找 ImmortalWrt 群，也不要找 OpenWrt 社区——**两边都不会接**
 > - **自己测试，自己兜底**
@@ -53,14 +54,15 @@
 
 ### 1. 直接远程执行
 
-```bash
 # 方式 A：下载后执行（推荐，兼容性最好）
+```bash
 curl -sSLO https://raw.githubusercontent.com/wacpi/asu-openwrt/master/openwrt.sh
 chmod +x openwrt.sh
 ./openwrt.sh
-
+```
 # 方式 B：管道一键执行（快捷，部分系统可能因编码问题报错）
-# bash <(curl -sSL https://raw.githubusercontent.com/wacpi/asu-openwrt/master/openwrt.sh)
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/wacpi/asu-openwrt/master/openwrt.sh)
 ```
 
 ### 2. 或先传输再执行
